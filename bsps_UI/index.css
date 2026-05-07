@@ -1,0 +1,72 @@
+/* ── CSS 변수 (색상 팔레트 전체 정의) ── */
+:root {
+  --bg: #070810;
+  --s1: #0d0f1a;
+  --s2: #131622;
+  --s3: #1a1d2e;
+  --s4: #21253a;
+
+  --a: #ff6b35;
+  --a2: #ff9f1c;
+  --a-dim: rgba(255, 107, 53, 0.1);
+  --a-glow: rgba(255, 107, 53, 0.3);
+  --a-grad: linear-gradient(135deg, #ff6b35, #ff9f1c);
+
+  --t: #00d4aa;
+  --t-dim: rgba(0, 212, 170, 0.1);
+
+  --border: rgba(255, 255, 255, 0.05);
+  --border2: rgba(255, 255, 255, 0.1);
+  --border3: rgba(255, 255, 255, 0.16);
+
+  --text: #e2e5f0;
+  --muted: #5a6080;
+  --dim: #2a2f45;
+
+  --mono: 'JetBrains Mono', monospace;
+  --display: 'Syne', sans-serif;
+  --body: 'Noto Sans KR', sans-serif;
+}
+
+/* ── 기본 리셋 ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--body);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── 전역 애니메이션 ── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes shimmer {
+  0%, 100% { opacity: 0.35; }
+  50%       { opacity: 0.7; }
+}
+
+@keyframes cardIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
