@@ -1,12 +1,23 @@
+import { useClock } from "../hooks/useClock.js";
+
 function extractRunningCount(prediction) {
   const m = String(prediction ?? "").match(/(\d+)대/);
   return m?.[1] ?? "?";
+}
+
+function useRemainSec(predictedDepartureTs, fallbackSec) {
+  const now = useClock();
+  if (predictedDepartureTs == null) return fallbackSec ?? null;
+  const diff = Math.round(predictedDepartureTs - now.getTime() / 1000);
+  return Math.max(0, diff);
 }
 
 export default function BusCard({ item }) {
   const status = item?.status;
   const lay = status === "LAYOVER";
   const run = status === "RUNNING";
+
+  const remainSec = useRemainSec(item?.predicted_departure_ts, item?.wait_time_sec);
 
   const cc = lay ? "is-lay" : run ? "is-run" : "is-unk";
   const rb = lay ? "rb-lay" : run ? "rb-run" : "rb-unk";
@@ -17,13 +28,14 @@ export default function BusCard({ item }) {
   let bigT = "—";
   let tlabel = "";
 
-  if (lay && item?.wait_time_sec != null) {
-    const wait = Number(item.wait_time_sec);
-    if (Number.isFinite(wait)) {
-      const m = Math.floor(wait / 60);
-      const s = Math.max(0, Math.floor(wait % 60));
-      if (m > 0) bigT = `${m}분`;
-      else bigT = `${s}초`;
+  if (lay && remainSec != null) {
+    if (remainSec <= 0) {
+      bigT = "출발";
+      tlabel = "곧 출발";
+    } else {
+      const m = Math.floor(remainSec / 60);
+      const s = remainSec % 60;
+      bigT = m > 0 ? `${m}분 ${s > 0 ? s + "초" : ""}`.trim() : `${s}초`;
       tlabel = "출발까지";
     }
   } else if (run) {
@@ -32,8 +44,8 @@ export default function BusCard({ item }) {
   }
 
   const pct =
-    lay && item?.wait_time_sec != null
-      ? Math.min(100, Math.max(0, Math.round(((480 - Number(item.wait_time_sec)) / 480) * 100)))
+    lay && remainSec != null
+      ? Math.min(100, Math.max(0, Math.round(((480 - remainSec) / 480) * 100)))
       : 0;
 
   return (
@@ -69,4 +81,3 @@ export default function BusCard({ item }) {
     </div>
   );
 }
-

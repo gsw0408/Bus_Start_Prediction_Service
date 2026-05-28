@@ -50,6 +50,14 @@ class ArrivalRow:
     remain_stop: str
 
 
+@dataclass(frozen=True)
+class BusLocationRow:
+    line_id: str
+    bus_id: str
+    curr_stop_id: str
+    seq: int
+
+
 class GwangjuBisClient:
     """
     광주 BIS XML API 클라이언트.
@@ -57,6 +65,7 @@ class GwangjuBisClient:
     - lineInfo: 노선 목록
     - lineStationInfo: 노선-정류장 목록(순번 포함)
     - arriveInfo: 정류장 기준 도착정보(BUS_ID 포함)
+    - busLocationInfo: 노선 기준 실시간 버스 위치(SEQ 포함)
     """
 
     def __init__(self, service_key: str | None) -> None:
@@ -84,6 +93,11 @@ class GwangjuBisClient:
 
     async def fetch_arrivals_xml(self, busstop_id: str) -> bytes:
         r = await self._client.get("/arriveInfo", params=self._params({"BUSSTOP_ID": busstop_id}))
+        r.raise_for_status()
+        return r.content
+
+    async def fetch_bus_locations_xml(self, line_id: str) -> bytes:
+        r = await self._client.get("/busLocationInfo", params=self._params({"LINE_ID": line_id}))
         r.raise_for_status()
         return r.content
 
@@ -159,5 +173,32 @@ def parse_arrivals(xml_bytes: bytes, busstop_id: str) -> list[ArrivalRow]:
                 remain_stop=remain_stop,
             )
         )
+    return out
+
+
+def parse_bus_locations(xml_bytes: bytes) -> list[BusLocationRow]:
+    root = ET.fromstring(xml_bytes)
+    out: list[BusLocationRow] = []
+    for el in root.iter():
+        if _local(el.tag) != "BUSLOCATION":
+            continue
+        line_id = _text(el, "LINE_ID")
+        bus_id = _text(el, "BUS_ID")
+        curr_stop_id = _text(el, "CURR_STOP_ID")
+        seq_s = _text(el, "SEQ")
+        try:
+            seq = int(seq_s) if seq_s else 0
+        except ValueError:
+            seq = 0
+        if line_id and bus_id and seq > 0:
+            out.append(
+                BusLocationRow(
+                    line_id=line_id,
+                    bus_id=bus_id,
+                    curr_stop_id=curr_stop_id,
+                    seq=seq,
+                )
+            )
+    out.sort(key=lambda x: x.seq)
     return out
 

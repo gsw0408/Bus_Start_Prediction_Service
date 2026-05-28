@@ -9,6 +9,11 @@ class Settings(BaseSettings):
 
     gwangju_service_key: str | None = Field(default=None, validation_alias="GWANGJU_SERVICE_KEY")
     redis_url: str = Field(default="redis://localhost:6379/0", validation_alias="REDIS_URL")
+    cors_origins: str = Field(
+        default="http://localhost:5173,http://127.0.0.1:5173",
+        validation_alias="CORS_ORIGINS",
+        description="Comma-separated frontend origins allowed to call the API.",
+    )
 
     monitored_line_ids: str | None = Field(
         default=None,
@@ -18,11 +23,15 @@ class Settings(BaseSettings):
     layover_missing_sec: int = Field(default=60, validation_alias="LAYOVER_MISSING_SEC")
     line_history_maxlen: int = Field(default=40, validation_alias="LINE_HISTORY_MAXLEN")
 
-    model_path: str | None = Field(default=None, validation_alias="MODEL_PATH")
+    model_path: str | None = Field(default="model", validation_alias="MODEL_PATH")
 
     @property
     def monitored_lines(self) -> list[str]:
         if not self.monitored_line_ids:
             return []
         return [x.strip() for x in self.monitored_line_ids.split(",") if x.strip()]
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [x.strip() for x in self.cors_origins.split(",") if x.strip()]
 

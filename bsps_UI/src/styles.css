@@ -288,6 +288,37 @@ main{position:relative;z-index:1;max-width:680px;margin:0 auto;padding:90px 1.5r
 }
 .toast.show{transform:translateX(-50%) translateY(0)}
 
+/* ── Leaflet 다크 테마 ── */
+.leaflet-container { background: var(--s2) !important; }
+.leaflet-tile-pane { filter: brightness(0.55) saturate(0.7); }
+.leaflet-popup-content-wrapper {
+  background: var(--s2);
+  border: 1px solid var(--border2);
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.5);
+  color: var(--text);
+}
+.leaflet-popup-tip-container .leaflet-popup-tip { background: var(--s2); }
+.leaflet-popup-close-button { color: var(--muted) !important; }
+.leaflet-popup-content { margin: 12px 14px; }
+
+.popup-name   { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+.popup-id     { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-bottom: 8px; }
+.popup-routes { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
+.popup-route  {
+  background: var(--a-dim); color: var(--a);
+  border: 1px solid rgba(255,107,53,.2);
+  font-family: var(--mono); font-size: 10px;
+  padding: 2px 7px; border-radius: 4px;
+}
+.popup-btn {
+  width: 100%; padding: 7px 0;
+  background: linear-gradient(135deg,#ff6b35,#ff9f1c);
+  color: #fff; border: none; border-radius: 7px;
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  font-family: var(--body);
+}
+
 @media(max-width:520px){
   header{padding:0 1.2rem}
   main{padding:82px 1rem 6rem}

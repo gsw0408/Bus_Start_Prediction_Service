@@ -68,6 +68,91 @@ class RedisRepo:
             return []
         return [str(x) for x in arr]
 
+    async def get_stop_by_line_seq(self, line_id: str, seq: int) -> dict | None:
+        """Return stop metadata for the stop whose stored seq matches line_id."""
+        target_seq = int(seq)
+        async for k in self.r.scan_iter(match="stop:*:meta", count=500):
+            key = k if isinstance(k, str) else k.decode("utf-8")
+            d = await self.r.hgetall(key)
+            if not d:
+                continue
+
+            def _s(name: str) -> str:
+                v = d.get(name, "")
+                return v if isinstance(v, str) else (v.decode("utf-8") if v else "")
+
+            try:
+                seqs = json.loads(_s("seqs") or "{}")
+            except Exception:
+                seqs = {}
+            try:
+                if int(seqs.get(str(line_id), -1)) != target_seq:
+                    continue
+            except Exception:
+                continue
+
+            stop_id = key.split(":")[1]
+            return {
+                "id": stop_id,
+                "name": _s("name") or stop_id,
+                "seq": target_seq,
+            }
+        return None
+
+    async def mark_stop_terminal(self, stop_id: str, *, line_id: str) -> None:
+        key = f"stop:{stop_id}:meta"
+        raw = await self.r.hget(key, "terminal_lines")
+        try:
+            tlines = json.loads(raw) if raw else []
+        except Exception:
+            tlines = []
+        if str(line_id) not in tlines:
+            tlines.append(str(line_id))
+        await self.r.hset(key, "terminal_lines", json.dumps(tlines, ensure_ascii=False))
+
+    async def upsert_stop_coords(self, stop_id: str, *, lat: float, lng: float) -> None:
+        key = f"stop:{stop_id}:meta"
+        await self.r.hset(key, mapping={"lat": str(lat), "lng": str(lng)})
+
+    async def get_all_stops(self) -> list[dict]:
+        out: list[dict] = []
+        async for k in self.r.scan_iter(match="stop:*:meta", count=500):
+            key = k if isinstance(k, str) else k.decode("utf-8")
+            stop_id = key.split(":")[1]
+            d = await self.r.hgetall(key)
+            if not d:
+                continue
+            def _s(name: str) -> str:
+                v = d.get(name, "")
+                return v if isinstance(v, str) else (v.decode("utf-8") if v else "")
+
+            lines_raw = _s("lines")
+            try:
+                lines = json.loads(lines_raw) if lines_raw else []
+            except Exception:
+                lines = []
+
+            lat_s, lng_s = _s("lat"), _s("lng")
+            lat = float(lat_s) if lat_s else None
+            lng = float(lng_s) if lng_s else None
+
+            terminal_raw = _s("terminal_lines")
+            try:
+                terminal_lines = json.loads(terminal_raw) if terminal_raw else []
+            except Exception:
+                terminal_lines = []
+
+            out.append({
+                "id": stop_id,
+                "name": _s("name") or stop_id,
+                "lines": [str(x) for x in lines],
+                "lat": lat,
+                "lng": lng,
+                "is_terminal": len(terminal_lines) > 0,
+            })
+        out.sort(key=lambda x: x["id"])
+        return out
+
     # ---------- bus state ----------
     async def get_bus_state(self, bus_id: str) -> BusState:
         key = f"bus:{bus_id}:state"
@@ -137,6 +222,23 @@ class RedisRepo:
             if st.status == "LAYOVER" and st.line_id == line_id:
                 out.append(st)
         return out
+
+    # ---------- line departure ----------
+    async def set_line_last_departure(self, line_id: str, *, ts: float, bus_id: str | None = None) -> None:
+        mapping = {"last_departure_ts": str(float(ts))}
+        if bus_id:
+            mapping["last_departure_bus_id"] = str(bus_id)
+        await self.r.hset(f"line:{line_id}:state", mapping=mapping)
+
+    async def get_line_last_departure_ts(self, line_id: str) -> float | None:
+        raw = await self.r.hget(f"line:{line_id}:state", "last_departure_ts")
+        if raw is None:
+            return None
+        s = raw if isinstance(raw, str) else raw.decode("utf-8")
+        try:
+            return float(s)
+        except Exception:
+            return None
 
     # ---------- line history ----------
     async def push_line_history(self, line_id: str, item: dict) -> None:

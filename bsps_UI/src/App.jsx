@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import Header from "./components/Header.jsx";
 import Hero from "./components/Hero.jsx";
+import MonitoredLines from "./components/MonitoredLines.jsx";
 import ResultSection from "./components/ResultSection.jsx";
-import SearchCard from "./components/SearchCard.jsx";
+import SearchBar from "./components/SearchBar.jsx";
 import StatsRow from "./components/StatsRow.jsx";
 import Toast from "./components/Toast.jsx";
 import { useArrivalPrediction } from "./hooks/useArrivalPrediction.js";
@@ -31,8 +32,8 @@ export default function App() {
       <main>
         <Hero />
         <StatsRow lines={lines} />
-        <SearchCard
-          initialStopId={stopId}
+        <MonitoredLines />
+        <SearchBar
           onSearch={(id) => {
             const v = String(id ?? "").trim();
             if (!v) {
@@ -41,6 +42,7 @@ export default function App() {
             }
             setStopId(v);
           }}
+          loading={loading}
         />
         <ResultSection
           stopId={stopId}
