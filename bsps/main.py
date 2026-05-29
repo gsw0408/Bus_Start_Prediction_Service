@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import asyncio
+import socket
 import time
 from contextlib import asynccontextmanager
 
+import httpx
 import redis.asyncio as aioredis
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+from bsps.bis_client import BASE as GWANGJU_BIS_BASE
 from bsps.bis_client import GwangjuBisClient, parse_arrivals, parse_lines
 from bsps.collector import Collector
 from bsps.inference import InferenceEngine
@@ -36,6 +40,14 @@ def _remain_min_value(value: str | None) -> float | None:
         return float(digits)
     except ValueError:
         return None
+
+
+async def _resolve_host(host: str) -> dict:
+    try:
+        infos = await asyncio.to_thread(socket.getaddrinfo, host, 80, type=socket.SOCK_STREAM)
+        return {"ok": True, "addresses": sorted({item[4][0] for item in infos})}
+    except Exception as exc:
+        return {"ok": False, "error_type": type(exc).__name__, "error": str(exc)}
 
 
 @asynccontextmanager
@@ -124,6 +136,65 @@ async def health(request: Request):
 @app.get("/")
 async def root():
     return {"status": "ok", "service": "bsps", "health": "/health"}
+
+
+@app.get("/debug/bis-test")
+async def debug_bis_test(
+    request: Request,
+    line_id: str = Query("17", min_length=1, description="LINE_ID used for lineStationInfo and busLocationInfo tests."),
+):
+    settings = request.app.state.settings
+    timeout = httpx.Timeout(15.0, connect=8.0)
+    tests = [
+        ("lineInfo", "/lineInfo", {}),
+        ("lineStationInfo", "/lineStationInfo", {"LINE_ID": line_id}),
+        ("busLocationInfo", "/busLocationInfo", {"LINE_ID": line_id}),
+    ]
+
+    results = []
+    async with httpx.AsyncClient(base_url=GWANGJU_BIS_BASE, timeout=timeout) as client:
+        for name, path, params in tests:
+            request_params = dict(params)
+            if settings.gwangju_service_key:
+                request_params["serviceKey"] = settings.gwangju_service_key
+
+            started = time.perf_counter()
+            try:
+                response = await client.get(path, params=request_params)
+                elapsed_ms = round((time.perf_counter() - started) * 1000)
+                sample = response.text[:500].replace("\r", " ").replace("\n", " ")
+                results.append(
+                    {
+                        "name": name,
+                        "ok": response.is_success,
+                        "status_code": response.status_code,
+                        "elapsed_ms": elapsed_ms,
+                        "byte_count": len(response.content),
+                        "content_type": response.headers.get("content-type"),
+                        "params_without_secret": params,
+                        "body_sample": sample,
+                    }
+                )
+            except Exception as exc:
+                elapsed_ms = round((time.perf_counter() - started) * 1000)
+                results.append(
+                    {
+                        "name": name,
+                        "ok": False,
+                        "elapsed_ms": elapsed_ms,
+                        "params_without_secret": params,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    }
+                )
+
+    return {
+        "service": "bsps",
+        "target_base_url": GWANGJU_BIS_BASE,
+        "service_key_configured": bool(settings.gwangju_service_key),
+        "dns": await _resolve_host("api.gwangju.go.kr"),
+        "tests": results,
+    }
 
 
 @app.get("/api/lines")
