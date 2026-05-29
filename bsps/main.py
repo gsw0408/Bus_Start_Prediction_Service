@@ -106,15 +106,11 @@ async def root():
 @app.get("/api/lines")
 async def list_lines(
     request: Request,
-    bis: GwangjuBisClient = Depends(get_bis),
     repo: RedisRepo = Depends(get_repo),
 ):
     collector = request.app.state.collector
     monitored = collector.monitored_line_ids or []
-    try:
-        line_name_map = {x.line_id: x.line_name for x in parse_lines(await bis.fetch_lines_xml())}
-    except Exception:
-        line_name_map = {}
+    line_name_map = dict(getattr(collector, "_line_name", {}) or {})
 
     result = []
     for lid in monitored:
@@ -137,15 +133,12 @@ async def list_lines(
 
 @app.get("/api/stops")
 async def list_stops(
+    request: Request,
     repo: RedisRepo = Depends(get_repo),
-    bis: GwangjuBisClient = Depends(get_bis),
 ):
     stops = await repo.get_all_stops()
-    # line_id → line_name 매핑 추가
-    try:
-        line_name_map = {x.line_id: x.line_name for x in parse_lines(await bis.fetch_lines_xml())}
-    except Exception:
-        line_name_map = {}
+    collector = request.app.state.collector
+    line_name_map = dict(getattr(collector, "_line_name", {}) or {})
     for stop in stops:
         stop["line_names"] = [line_name_map.get(lid, lid) for lid in stop["lines"]]
     return {"stops": stops}
