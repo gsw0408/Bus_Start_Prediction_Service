@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 
 from bsps.bis_client import (
@@ -11,6 +12,9 @@ from bsps.bis_client import (
     parse_lines,
 )
 from bsps.redis_repo import RedisRepo
+
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> float:
@@ -50,10 +54,38 @@ class Collector:
         self._line_name: dict[str, str] = {}
         self._terminal_stops: dict[str, list[str]] = {}  # line_id -> [first_stop_id, last_stop_id]
         self._terminal_seqs: dict[str, tuple[int, int]] = {}  # line_id -> (first_seq, last_seq)
+        self.warmup_attempts = 0
+        self.warmup_completed = False
+        self.last_warmup_ts: float | None = None
+        self.last_tick_ts: float | None = None
+        self.tick_count = 0
+        self.last_error: str | None = None
 
     async def start(self) -> None:
         self._stop_event.clear()
         self._task = asyncio.create_task(self._run_loop(), name="bsps-collector")
+        self._task.add_done_callback(self._log_task_result)
+
+    def _log_task_result(self, task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.exception("Collector task stopped unexpectedly", exc_info=exc)
+
+    def status(self) -> dict:
+        return {
+            "warmup_attempts": self.warmup_attempts,
+            "warmup_completed": self.warmup_completed,
+            "last_warmup_ts": self.last_warmup_ts,
+            "last_tick_ts": self.last_tick_ts,
+            "tick_count": self.tick_count,
+            "last_error": self.last_error,
+            "monitored_line_count": len(self.monitored_line_ids),
+            "line_name_count": len(self._line_name),
+            "terminal_line_count": len(self._terminal_stops),
+            "terminal_stop_count": sum(len(v) for v in self._terminal_stops.values()),
+        }
 
     async def stop(self) -> None:
         self._stop_event.set()
@@ -78,10 +110,14 @@ class Collector:
                 if data:
                     return float(data[0]["lat"]), float(data[0]["lon"])
         except Exception:
-            pass
+            logger.exception("Failed to geocode stop: %s", name)
         return None
 
     async def _warmup(self) -> None:
+        self.warmup_attempts += 1
+        self.warmup_completed = False
+        logger.info("Collector warmup started for %s monitored lines", len(self.monitored_line_ids))
+
         # 라인 목록/이름 확보(모니터링 라인 없으면 전체를 가져오려 시도)
         if not self.monitored_line_ids:
             try:
@@ -89,6 +125,8 @@ class Collector:
                 self.monitored_line_ids = [x.line_id for x in lines]
                 self._line_name.update({x.line_id: x.line_name for x in lines})
             except Exception:
+                self.last_error = "failed to fetch lineInfo"
+                logger.exception("Failed to fetch lineInfo during collector warmup")
                 self.monitored_line_ids = []
         else:
             # line name 채우기(가능한 범위)
@@ -96,15 +134,19 @@ class Collector:
                 lines = parse_lines(await self.bis.fetch_lines_xml())
                 self._line_name.update({x.line_id: x.line_name for x in lines})
             except Exception:
-                pass
+                self.last_error = "failed to fetch line names"
+                logger.exception("Failed to fetch line names during collector warmup")
 
         # 노선별 종점 정류장 계산 + stop meta 저장
         for line_id in self.monitored_line_ids:
             try:
                 stops = parse_line_stations(await self.bis.fetch_line_stations_xml(line_id), line_id=line_id)
             except Exception:
+                self.last_error = f"failed to fetch lineStationInfo for line {line_id}"
+                logger.exception("Failed to fetch lineStationInfo for line_id=%s", line_id)
                 continue
             if not stops:
+                logger.warning("No stops parsed for line_id=%s", line_id)
                 continue
             first_id = stops[0].busstop_id
             last_id = stops[-1].busstop_id
@@ -120,6 +162,15 @@ class Collector:
             # 좌표가 없는 정류장은 백그라운드에서 Nominatim 지오코딩
             asyncio.create_task(self._geocode_stops_bg(stops))
 
+        self.last_warmup_ts = _now()
+        self.warmup_completed = bool(self._terminal_stops)
+        logger.info(
+            "Collector warmup finished: line_names=%s terminal_lines=%s terminal_stops=%s",
+            len(self._line_name),
+            len(self._terminal_stops),
+            sum(len(v) for v in self._terminal_stops.values()),
+        )
+
     async def _geocode_stops_bg(self, stops: list) -> None:
         """좌표 없는 정류장을 Nominatim으로 백그라운드 지오코딩 (1초 간격)."""
         for s in stops:
@@ -131,7 +182,7 @@ class Collector:
                 if coords:
                     await self.repo.upsert_stop_coords(s.busstop_id, lat=coords[0], lng=coords[1])
             except Exception:
-                pass
+                logger.exception("Failed to store geocoded coords for stop_id=%s", s.busstop_id)
             await asyncio.sleep(1.1)  # Nominatim ToS: 1 req/sec
 
     async def _run_loop(self) -> None:
@@ -140,21 +191,25 @@ class Collector:
         except Exception:
             # Railway 같은 배포 환경에서는 앱 기동 자체가 먼저 성공해야 한다.
             # 초기 수집 실패는 다음 주기에서 다시 시도한다.
-            pass
+            self.last_error = "warmup failed"
+            logger.exception("Collector warmup failed")
 
         while not self._stop_event.is_set():
             if self.monitored_line_ids and not self._terminal_stops:
                 try:
                     await self._warmup()
                 except Exception:
-                    pass
+                    self.last_error = "warmup retry failed"
+                    logger.exception("Collector warmup retry failed")
 
             t0 = _now()
             try:
                 await self._tick()
+                self.last_tick_ts = _now()
+                self.tick_count += 1
             except Exception:
-                # 운영에서는 로깅 추가
-                pass
+                self.last_error = "tick failed"
+                logger.exception("Collector tick failed")
             dt = _now() - t0
             await asyncio.sleep(max(0.0, self.period_sec - dt))
 
@@ -174,6 +229,11 @@ class Collector:
                 try:
                     rows = parse_arrivals(await self.bis.fetch_arrivals_xml(terminal_id), busstop_id=terminal_id)
                 except Exception:
+                    logger.exception(
+                        "Failed to fetch arriveInfo for terminal_id=%s line_id=%s",
+                        terminal_id,
+                        line_id,
+                    )
                     continue
 
                 for r in rows:

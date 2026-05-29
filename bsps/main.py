@@ -94,8 +94,27 @@ def get_infer(request: Request) -> InferenceEngine:
 
 
 @app.get("/health")
-async def health():
-    return {"status": "ok", "service": "bsps"}
+async def health(request: Request):
+    collector = getattr(request.app.state, "collector", None)
+    repo = getattr(request.app.state, "repo", None)
+    redis_ok = False
+    stop_meta_count = None
+    if repo is not None:
+        try:
+            redis_ok = bool(await repo.r.ping())
+            stop_meta_count = 0
+            async for _ in repo.r.scan_iter(match="stop:*:meta", count=500):
+                stop_meta_count += 1
+        except Exception:
+            redis_ok = False
+
+    return {
+        "status": "ok",
+        "service": "bsps",
+        "redis_ok": redis_ok,
+        "stop_meta_count": stop_meta_count,
+        "collector": collector.status() if collector is not None else None,
+    }
 
 
 @app.get("/")
