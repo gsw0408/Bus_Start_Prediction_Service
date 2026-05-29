@@ -53,7 +53,6 @@ class Collector:
 
     async def start(self) -> None:
         self._stop_event.clear()
-        await self._warmup()
         self._task = asyncio.create_task(self._run_loop(), name="bsps-collector")
 
     async def stop(self) -> None:
@@ -136,7 +135,20 @@ class Collector:
             await asyncio.sleep(1.1)  # Nominatim ToS: 1 req/sec
 
     async def _run_loop(self) -> None:
+        try:
+            await self._warmup()
+        except Exception:
+            # Railway 같은 배포 환경에서는 앱 기동 자체가 먼저 성공해야 한다.
+            # 초기 수집 실패는 다음 주기에서 다시 시도한다.
+            pass
+
         while not self._stop_event.is_set():
+            if self.monitored_line_ids and not self._terminal_stops:
+                try:
+                    await self._warmup()
+                except Exception:
+                    pass
+
             t0 = _now()
             try:
                 await self._tick()

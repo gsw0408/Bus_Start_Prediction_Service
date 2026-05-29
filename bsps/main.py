@@ -98,6 +98,11 @@ async def health():
     return {"status": "ok", "service": "bsps"}
 
 
+@app.get("/")
+async def root():
+    return {"status": "ok", "service": "bsps", "health": "/health"}
+
+
 @app.get("/api/lines")
 async def list_lines(
     request: Request,
