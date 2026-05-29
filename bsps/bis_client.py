@@ -70,7 +70,12 @@ class GwangjuBisClient:
 
     def __init__(self, service_key: str | None) -> None:
         self._key = (service_key or "").strip() or None
-        self._client = httpx.AsyncClient(base_url=BASE, timeout=30.0)
+        timeout = httpx.Timeout(12.0, connect=5.0)
+        self._client = httpx.AsyncClient(base_url=BASE, timeout=timeout)
+
+    @property
+    def service_key_configured(self) -> bool:
+        return self._key is not None
 
     async def aclose(self) -> None:
         await self._client.aclose()

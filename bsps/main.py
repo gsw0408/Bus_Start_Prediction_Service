@@ -97,6 +97,7 @@ def get_infer(request: Request) -> InferenceEngine:
 async def health(request: Request):
     collector = getattr(request.app.state, "collector", None)
     repo = getattr(request.app.state, "repo", None)
+    bis = getattr(request.app.state, "bis", None)
     redis_ok = False
     stop_meta_count = None
     if repo is not None:
@@ -112,6 +113,9 @@ async def health(request: Request):
         "status": "ok",
         "service": "bsps",
         "redis_ok": redis_ok,
+        "bis_service_key_configured": bool(
+            getattr(bis, "service_key_configured", False)
+        ),
         "stop_meta_count": stop_meta_count,
         "collector": collector.status() if collector is not None else None,
     }
