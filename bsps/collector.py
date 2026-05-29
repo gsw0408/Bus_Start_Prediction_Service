@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import csv
 import logging
 import time
-from pathlib import Path
 
 from bsps.bis_client import (
     GwangjuBisClient,
@@ -143,7 +141,6 @@ class Collector:
             except Exception:
                 self.last_error = "failed to fetch line names"
                 logger.exception("Failed to fetch line names during collector warmup")
-
         # 노선별 종점 정류장 계산 + stop meta 저장
         for line_id in self.monitored_line_ids:
             try:
@@ -170,9 +167,6 @@ class Collector:
             # 좌표가 없는 정류장은 백그라운드에서 Nominatim 지오코딩
             asyncio.create_task(self._geocode_stops_bg(stops))
 
-        if not self._terminal_stops:
-            await self._warmup_from_csv_fallback()
-
         self.last_warmup_ts = _now()
         self.warmup_completed = bool(self._terminal_stops)
         self.last_stage = "warmup:finished"
@@ -181,75 +175,6 @@ class Collector:
             len(self._line_name),
             len(self._terminal_stops),
             sum(len(v) for v in self._terminal_stops.values()),
-        )
-
-    async def _warmup_from_csv_fallback(self) -> None:
-        """Seed stop metadata from bundled CSV files when the live BIS API is unreachable."""
-        self.last_stage = "warmup:csv_fallback"
-        root = Path(__file__).resolve().parents[1]
-        arrive_path = root / "model" / "arrive(2026-05-02).csv"
-        location_path = root / "model" / "buslocation(2026-05-02).csv"
-        if not arrive_path.exists() or not location_path.exists():
-            logger.warning("CSV fallback skipped because model CSV files are missing")
-            return
-
-        stop_names: dict[str, str] = {}
-        line_names: dict[str, str] = {}
-        try:
-            with arrive_path.open("r", encoding="utf-8-sig", newline="") as f:
-                for row in csv.DictReader(f):
-                    line_id = (row.get("LINE_ID") or "").strip()
-                    stop_id = (row.get("CURR_STOP_ID") or "").strip()
-                    if line_id and row.get("LINE_NAME"):
-                        line_names[line_id] = row["LINE_NAME"].strip()
-                    if stop_id and row.get("BUSSTOP_NAME"):
-                        stop_names[stop_id] = row["BUSSTOP_NAME"].strip()
-        except Exception:
-            logger.exception("Failed to read arrive CSV fallback")
-
-        seq_by_line: dict[str, dict[str, int]] = {}
-        try:
-            with location_path.open("r", encoding="utf-8-sig", newline="") as f:
-                for row in csv.DictReader(f):
-                    line_id = (row.get("LINE_ID") or "").strip()
-                    stop_id = (row.get("CURR_STOP_ID") or "").strip()
-                    if not line_id or not stop_id or stop_id == "0":
-                        continue
-                    try:
-                        seq = int(float(row.get("SEQ") or 0))
-                    except ValueError:
-                        continue
-                    if 0 < seq < 900:
-                        seq_by_line.setdefault(line_id, {})[stop_id] = seq
-        except Exception:
-            logger.exception("Failed to read buslocation CSV fallback")
-
-        target_lines = set(self.monitored_line_ids or seq_by_line.keys())
-        for line_id in sorted(target_lines):
-            pairs = seq_by_line.get(line_id) or {}
-            if not pairs:
-                continue
-            self._line_name.setdefault(line_id, line_names.get(line_id, line_id))
-            for stop_id, seq in pairs.items():
-                await self.repo.upsert_stop_meta(
-                    stop_id,
-                    name=stop_names.get(stop_id, stop_id),
-                    line_id=line_id,
-                    seq=seq,
-                )
-
-            ordered = sorted(pairs.items(), key=lambda x: x[1])
-            first_id = ordered[0][0]
-            last_id = ordered[-1][0]
-            self._terminal_stops[line_id] = [first_id, last_id]
-            self._terminal_seqs[line_id] = (ordered[0][1], ordered[-1][1])
-            await self.repo.mark_stop_terminal(first_id, line_id=line_id)
-            await self.repo.mark_stop_terminal(last_id, line_id=line_id)
-
-        logger.info(
-            "CSV fallback seeded stop metadata: lines=%s stops=%s",
-            len(self._terminal_stops),
-            sum(len(v) for v in seq_by_line.values()),
         )
 
     async def _geocode_stops_bg(self, stops: list) -> None:
