@@ -207,9 +207,3 @@ Vercel은 HTTPS 환경이므로 HTTP 백엔드를 직접 호출하면 Mixed Cont
 - 터널 주소가 바뀌면 Vercel의 `VITE_API_BASE_URL`도 함께 수정해야 합니다.
 - 모니터링 노선을 너무 많이 늘리면 광주 BIS API 호출량이 증가할 수 있습니다.
 - Redis 데이터는 서버 재시작 또는 Redis 초기화 시 사라질 수 있으므로 운영 환경에서는 백업 또는 영속화 설정이 필요합니다.
-
-## 발표용 요약
-
-이 프로젝트는 광주 BIS 실시간 데이터와 XGBoost 예측 모델을 결합해 종점 버스의 출발 예정 시간을 알려주는 서비스입니다.  
-프론트엔드는 React와 Vercel로 구성했고, 백엔드는 FastAPI와 Redis를 사용했습니다.  
-Railway 배포 중 광주 BIS API 연결 문제가 발생해, 최종적으로 네이버 클라우드 국내 서버와 Cloudflare Tunnel을 이용해 서비스를 배포했습니다.
